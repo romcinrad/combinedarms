@@ -1,0 +1,133 @@
+{
+    "_comment": "DO NOT EDIT: FILE GENERATED AUTOMATICALLY BY PTERODACTYL PANEL - PTERODACTYL.IO",
+    "meta": {
+        "version": "PTDL_v2",
+        "update_url": null
+    },
+    "exported_at": "2026-10-10T18:55:00-03:00",
+    "name": "OpenRA Combined Arms",
+    "author": "info@romcinrad.com.ar",
+    "description": "Servidor dedicado de Command & Conquer: Combined Arms (mod de OpenRA). Descarga el AppImage de Linux desde las releases de GitHub (Inq8/CAmod), lo extrae sin FUSE y lanza el servidor dedicado por TCP.",
+    "features": null,
+    "docker_images": {
+        ".NET 6 (recomendada)": "ghcr.io/parkervcp/yolks:dotnet_6",
+        ".NET 8": "ghcr.io/parkervcp/yolks:dotnet_8"
+    },
+    "file_denylist": [],
+    "startup": "bash ./start.sh",
+    "config": {
+        "files": "{}",
+        "startup": "{\"done\": \"Starting dedicated server\"}",
+        "logs": "{}",
+        "stop": "^C"
+    },
+    "scripts": {
+        "installation": {
+            "script": "#!/bin/bash\n# OpenRA Combined Arms - instalador del servidor dedicado (corre en /mnt/server)\nset -e\n\nREPO=\"Inq8/CAmod\"\nVERSION=\"${CA_VERSION:-latest}\"\n\ncd /mnt/server\n\nif [ \"${VERSION}\" = \"latest\" ]; then\n  echo \"[install] Resolviendo la ultima release de ${REPO}...\"\n  VERSION=$(curl -fsSLI -o /dev/null -w '%{url_effective}' \"https://github.com/${REPO}/releases/latest\" | sed -E 's#.*/tag/##')\n  case \"${VERSION}\" in\n    \"\"|*/*|*\" \"*) echo \"[install] No se pudo resolver 'latest'. Defini CA_VERSION con un tag (ej. 1.09).\"; exit 1 ;;\n  esac\nfi\n\nASSET=\"CombinedArms-${VERSION}-x86_64.AppImage\"\nURL=\"https://github.com/${REPO}/releases/download/${VERSION}/${ASSET}\"\n\necho \"[install] Version: ${VERSION}\"\necho \"[install] Descargando ${URL}\"\n\n# Se conserva .openra (mapas, logs, motd); solo se reemplaza el programa\nrm -rf squashfs-root CombinedArms.AppImage\ncurl -fL --retry 3 --retry-delay 3 -o CombinedArms.AppImage \"${URL}\"\n\n# Verificacion de integridad: si CA_SHA256 tiene valor, el instalador aborta\n# cuando el hash del archivo descargado no coincide (no se ejecuta nada).\nEXPECTED=\"${CA_SHA256:-}\"\nif [ -n \"${EXPECTED}\" ]; then\n  ACTUAL=$(sha256sum CombinedArms.AppImage | cut -d' ' -f1)\n  if [ \"${ACTUAL}\" != \"${EXPECTED,,}\" ]; then\n    rm -f CombinedArms.AppImage\n    echo \"[install] ERROR: el SHA-256 NO coincide. Se aborta sin ejecutar el archivo.\"\n    echo \"[install]   esperado: ${EXPECTED,,}\"\n    echo \"[install]   obtenido: ${ACTUAL}\"\n    echo \"[install] Si cambiaste CA_VERSION, actualiza CA_SHA256 con el hash de esa release (o dejalo vacio para omitir la verificacion).\"\n    exit 1\n  fi\n  echo \"[install] SHA-256 verificado: ${ACTUAL}\"\nelse\n  echo \"[install] ADVERTENCIA: CA_SHA256 vacio, no se verifica la integridad del archivo.\"\nfi\n\nchmod +x CombinedArms.AppImage\n\necho \"[install] Extrayendo AppImage (no requiere FUSE)...\"\n./CombinedArms.AppImage --appimage-extract > /dev/null\nrm -f CombinedArms.AppImage\n\nif [ ! -x squashfs-root/usr/lib/openra/OpenRA.Server ]; then\n  echo \"[install] ERROR: la extraccion no produjo OpenRA.Server. Revisa la version indicada.\"\n  exit 1\nfi\n\nmkdir -p .openra\necho \"${VERSION}\" > .ca_version\n\ncat > start.sh <<'EOF'\n#!/bin/bash\n# Lanzador del servidor dedicado de OpenRA Combined Arms.\n# Lee las variables del egg desde el entorno, asi los valores con espacios\n# (nombre del servidor, MOTD) llegan intactos al servidor.\ncd \"$(dirname \"$(readlink -f \"$0\")\")\" || exit 1\nROOT=\"$PWD\"\nexport HOME=\"${ROOT}\"\nSUPPORT_DIR=\"${ROOT}/.openra\"\nENGINE_DIR=\"${ROOT}/squashfs-root/usr/lib/openra\"\n\n# OpenRA aborta si el directorio de soporte no existe\nmkdir -p \"${SUPPORT_DIR}\"\n\nif [ ! -x \"${ENGINE_DIR}/OpenRA.Server\" ]; then\n  echo \"[egg] No se encontro OpenRA.Server. Reinstala el servidor desde Settings > Reinstall Server.\"\n  exit 1\nfi\n\n# MOTD opcional (se escribe solo si la variable tiene contenido)\nif [ -n \"${CA_MOTD}\" ]; then\n  printf '%s\\n' \"${CA_MOTD}\" > \"${SUPPORT_DIR}/motd.txt\"\nfi\n\nARGS=(\n  \"Game.Mod=ca\"\n  \"Server.Name=${CA_SERVER_NAME:-Combined Arms Server}\"\n  \"Server.ListenPort=${SERVER_PORT:-1234}\"\n  \"Server.AdvertiseOnline=${CA_ADVERTISE:-True}\"\n  \"Server.Password=${CA_PASSWORD}\"\n  \"Server.EnableSingleplayer=${CA_SINGLEPLAYER:-False}\"\n  \"Server.RecordReplays=${CA_REPLAYS:-False}\"\n  \"Engine.SupportDir=${SUPPORT_DIR}\"\n)\n\nif [ -n \"${CA_MAP}\" ]; then\n  ARGS+=(\"Server.Map=${CA_MAP}\")\nfi\n\nif [ -n \"${CA_EXTRA_ARGS}\" ]; then\n  read -r -a EXTRA <<< \"${CA_EXTRA_ARGS}\"\n  ARGS+=(\"${EXTRA[@]}\")\nfi\n\necho \"[egg] Combined Arms $(cat \"${ROOT}/.ca_version\" 2>/dev/null) | puerto TCP ${SERVER_PORT:-1234}\"\n\n# exec: el servidor pasa a ser el proceso principal y recibe el ^C del panel\ncd \"${ENGINE_DIR}\" || exit 1\nexec ./OpenRA.Server \"${ARGS[@]}\"\nEOF\nchmod +x start.sh\n\necho \"[install] Listo. Version ${VERSION} instalada.\"\n",
+            "container": "ghcr.io/parkervcp/installers:debian",
+            "entrypoint": "bash"
+        }
+    },
+    "variables": [
+        {
+            "name": "Nombre del servidor",
+            "description": "Nombre que ven los jugadores en la lista de servidores.",
+            "env_variable": "CA_SERVER_NAME",
+            "default_value": "Combined Arms Server",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string|max:60",
+            "field_type": "text"
+        },
+        {
+            "name": "Contrasena del servidor",
+            "description": "Si se completa, los jugadores deben ingresarla para unirse. Dejar vacio para servidor publico.",
+            "env_variable": "CA_PASSWORD",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|string|max:64",
+            "field_type": "text"
+        },
+        {
+            "name": "Anunciar en la lista publica",
+            "description": "True: el servidor aparece en la lista de OpenRA (requiere el puerto TCP accesible desde Internet). False: solo por IP directa.",
+            "env_variable": "CA_ADVERTISE",
+            "default_value": "True",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string|in:True,False",
+            "field_type": "text"
+        },
+        {
+            "name": "Permitir un solo jugador",
+            "description": "True permite jugar solo contra bots en este servidor.",
+            "env_variable": "CA_SINGLEPLAYER",
+            "default_value": "False",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string|in:True,False",
+            "field_type": "text"
+        },
+        {
+            "name": "Grabar replays",
+            "description": "True guarda las partidas como replays en el servidor (.openra/Replays).",
+            "env_variable": "CA_REPLAYS",
+            "default_value": "False",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string|in:True,False",
+            "field_type": "text"
+        },
+        {
+            "name": "Mapa inicial (UID)",
+            "description": "UID (hash de 40 caracteres) del mapa con el que arranca el lobby. Vacio = mapa por defecto del mod.",
+            "env_variable": "CA_MAP",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|string|max:40|regex:/^[a-fA-F0-9]*$/",
+            "field_type": "text"
+        },
+        {
+            "name": "Mensaje de bienvenida (MOTD)",
+            "description": "Texto que se muestra al unirse al servidor. Si queda vacio no se modifica el motd.txt existente.",
+            "env_variable": "CA_MOTD",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|string|max:500",
+            "field_type": "text"
+        },
+        {
+            "name": "Argumentos extra",
+            "description": "Ajustes adicionales de OpenRA separados por espacios, ej: Server.EnableSyncReports=True Server.FloodLimitJoinCooldown=5000 (sin espacios dentro de cada valor). Solo editable por administradores.",
+            "env_variable": "CA_EXTRA_ARGS",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": false,
+            "rules": "nullable|string|max:300",
+            "field_type": "text"
+        },
+        {
+            "name": "Version de Combined Arms",
+            "description": "Tag de la release en GitHub (ej. 1.09). Se aplica al instalar/reinstalar. Si la cambias, actualiza tambien el SHA-256. Solo editable por administradores.",
+            "env_variable": "CA_VERSION",
+            "default_value": "1.09",
+            "user_viewable": true,
+            "user_editable": false,
+            "rules": "required|string|max:40|regex:/^[A-Za-z0-9._-]+$/",
+            "field_type": "text"
+        },
+        {
+            "name": "SHA-256 del AppImage",
+            "description": "Hash SHA-256 esperado del AppImage de la version indicada. El instalador aborta si no coincide. Vacio = no verificar. Valor por defecto: CombinedArms-1.09-x86_64.AppImage. Solo editable por administradores.",
+            "env_variable": "CA_SHA256",
+            "default_value": "09a56e835cdc22de896bd3731bf975442cbe31769cb04a54f9c444f28ed8049c",
+            "user_viewable": true,
+            "user_editable": false,
+            "rules": "nullable|string|max:64|regex:/^[a-fA-F0-9]*$/",
+            "field_type": "text"
+        }
+    ]
+}
